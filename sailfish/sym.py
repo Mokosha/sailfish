@@ -1084,6 +1084,9 @@ class S(object):
 
 
 class SlfSymbol(Symbol):
+    def __new__(cls, name, comment=None):
+        Symbol.__new__(cls, name)
+
     def __init__(self, name, comment=None):
         Symbol.__init__(name)
         self.comment = comment
