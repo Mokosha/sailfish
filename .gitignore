@@ -1,1 +1,3 @@
 *.pyc
+*.vti
+*.subdomains
