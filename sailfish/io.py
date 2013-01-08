@@ -179,10 +179,58 @@ class VTKOutput(LBOutput):
         LBOutput.__init__(self, config, subdomain_id)
         self.digits = filename_iter_digits(config.max_iters)
 
-    def save(self, i):
-        self.mask_nonfluid_nodes()
-        os.environ['ETS_TOOLKIT'] = 'null'
-        from tvtk.api import tvtk
+    def __save_vtk(self, i):
+        import vtk
+        idata = vtk.vtkImageData()
+        idata.SetSpacing(1, 1, 1)
+        idata.SetOrigin(0, 0, 0)
+
+        first = True
+        sample_field = None
+        for name, field in self._scalar_fields.iteritems():
+
+            scalars = vtk.vtkDoubleArray()
+            for s in field.flatten():
+                scalars.InsertNextValue(s)
+
+            if first:
+                idata.GetPointData().SetScalars(scalars)
+                idata.GetPointData().GetScalars().SetName(name)
+                first = False
+                sample_field = field
+            else:
+                t = idata.GetPointData().AddArray(scalars)
+                idata.GetPointData().GetArray(t).SetName(name)
+
+        idata.Update()
+        dim = len(sample_field.shape)
+
+        for name, field in self._vector_fields.iteritems():
+            xs = field[0].flatten()
+            ys = field[1].flatten()
+            zs = field[2].flatten() if dim == 3 else np.zeros_like(xs)
+
+            vectors = vtk.vtkDoubleArray()
+            vectors.SetNumberOfComponents(3)
+
+            for [x, y, z] in np.c_[xs, ys, zs]:
+                vectors.InsertNextTuple3(x, y, z)
+
+            t = idata.GetPointData().AddArray(vectors)
+            idata.GetPointData().GetArray(t).SetName(name)
+
+        revl = list(reversed(sample_field.shape))
+        idata.SetDimensions(revl[0], revl[1], revl[2] if dim == 3 else 1)
+
+        idata.Update()
+
+        fname = filename(self.basename, self.digits, self.subdomain_id, i, suffix='.vti')
+        w = vtk.vtkXMLImageDataWriter()
+        w.SetInput(idata)
+        w.SetFileName(fname)
+        w.Write()
+
+    def __save_tvtk(self, i, tvtk):
         idata = tvtk.ImageData(spacing=(1, 1, 1), origin=(0, 0, 0))
 
         first = True
@@ -218,6 +266,16 @@ class VTKOutput(LBOutput):
         fname = filename(self.basename, self.digits, self.subdomain_id, i, suffix='.vti')
         w = tvtk.XMLImageDataWriter(input=idata, file_name=fname)
         w.write()
+
+    def save(self, i):
+        self.mask_nonfluid_nodes()
+        os.environ['ETS_TOOLKIT'] = 'null'
+
+        try:
+            from tvtk.api import tvtk
+            self.__save_tvtk(i, tvtk)
+        except ImportError:
+            self.__save_vtk(i)
 
     # TODO: Implement this function.
     def dump_dists(self, dists, i):
