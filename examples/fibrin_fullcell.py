@@ -13,7 +13,7 @@ from vtk import *
 
 class FibrinBlock(Subdomain3D):
 
-    velx = 0.2
+    vel = 0.2
 
     def boundary_conditions(self, hx, hy, hz):
         print "Establishing boundary conditions..."
@@ -25,13 +25,13 @@ class FibrinBlock(Subdomain3D):
         wall_bc = NTFullBBWall
         wall_map = np.logical_or(
                         np.logical_or(hy == 0, hy == self.gy-1),
-                        np.logical_or(hz == 0, hz == self.gz-1))
+                        np.logical_or(hx == 0, hx == self.gx-1))
         self.set_node(wall_map, wall_bc)
 
         print "Defining velocity boundaries..."
         velocity_bc = NTEquilibriumVelocity
-        velocity_map = land(lor(hx == 0, hx == self.gx - 1), lnot(wall_map))
-        self.set_node(velocity_map, velocity_bc((self.velx, 0, 0)))
+        velocity_map = land(lor(hz == 0, hz == self.gz - 1), lnot(wall_map))
+        self.set_node(velocity_map, velocity_bc((0, 0, self.vel)))
 
         print "Defining fibrin boundaries..."
         self.load_fibrin_data()
@@ -63,10 +63,12 @@ class FibrinBlock(Subdomain3D):
         FibrinBlock.fibrin_map = np.zeros(domain_shape, dtype=np.float32)
 
         print "Mapping fibrin data..."
-        for i in xrange(data_shape[0]):
-            for j in xrange(data_shape[1]):
+        xOffset = (data_shape[0] - domain_shape[2]) / 2
+        yOffset = (data_shape[1] - domain_shape[1]) / 2
+        for i in xrange(self.gx):
+            for j in xrange(self.gy):
                 for k in xrange(data_shape[2]):
-                    FibrinBlock.fibrin_map[k+30][j][i] = idata.GetScalarComponentAsFloat(i, j, k, 0)
+                    FibrinBlock.fibrin_map[k+30][j][i] = idata.GetScalarComponentAsFloat(xOffset+i, yOffset+j, k, 0)
 
         FibrinBlock.fibrin_map = FibrinBlock.fibrin_map > 0.0
 
@@ -80,8 +82,8 @@ class FibrinSimulation(LBFluidSim, LBForcedSim):
     @classmethod
     def update_defaults(cls, defaults):
         defaults.update({
-            'lat_nx': 1024,
-            'lat_ny': 1024,
+            'lat_nx': 64,
+            'lat_ny': 64,
             'lat_nz': 128,
             'grid': 'D3Q19'})
 
