@@ -1,3 +1,6 @@
 *.pyc
-*.vti
-*.subdomains
+examples/out
+
+# Emacs temp files
+*~
+\#*\#
