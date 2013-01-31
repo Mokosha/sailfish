@@ -5,7 +5,7 @@
 <%namespace file="code_common.mako" import="*"/>
 
 ## Defines the actual acceleration vectors.
-<%def name="body_force(grid_idx, vector_decl=True)">
+<%def name="body_force(grid_idx=0, vector_decl=True)">
 	%if forces is not UNDEFINED and (forces.numeric or forces.symbolic):
 		%if sym_force.needs_accel(grid_idx, forces, {}):
 			%if forces.symbolic and time_dependence:
@@ -99,7 +99,7 @@
 		## components and grids used. If this assumption is ever changed, the code
 		## below will have to be extended appropriately.
 		%for j in range(0, dim):
-			iv0[${j}] += ${cex(sym_force.fluid_accel(sim, igrid, j, forces, force_couplings))};
+			iv0[${j}] += ${cex(0.5 * sym_force.fluid_accel(sim, igrid, j, forces, force_couplings))};
 		%endfor
 	%endif
 </%def>
@@ -148,7 +148,7 @@
 			%for a in range(0, dim):
 				%for b in range(a + 1, dim):
 					 tmp = ${cex(sym.ex_flux(grid, 'd0', a, b, config), pointers=True)} -
-						   ${cex(sym.S.rho * grid.v[a] * grid.v[b])};
+						   ${cex(sym.ex_eq_flux(grid, a, b))};
 					 strain += 2.0f * tmp * tmp;
 				%endfor
 			%endfor
@@ -156,7 +156,7 @@
 			// Diagonal components.
 			%for a in range(0, dim):
 				tmp = ${cex(sym.ex_flux(grid, 'd0', a, a, config), pointers=True)} -
-					  ${cex(sym.S.rho * (grid.v[a]**2 + grid.cssq))};
+					  ${cex(sym.ex_eq_flux(grid, a, a))};
 				strain += tmp * tmp;
 			%endfor
 
@@ -184,4 +184,17 @@
 	%endfor
 
 	${update_relaxation_time(grid_idx)}
+
+	## TODO: If the regularization is never used with collision operators
+	## other than LBGK, move this directly to BGK relaxate and replace
+	## the normal collision step with: fi = feq + (1 - omega) freg.
+	%if regularized:
+		float flux[${flux_components}];
+		compute_noneq_2nd_moment(d0, rho, v0, flux);
+		<% reg_diff = sym.reglb_flux_tensor(grid) %>
+
+		%for feq, idx, reg in zip(eq.expression, grid.idx_name, reg_diff):
+			d0->${idx} = feq0.${idx} + ${cex(reg, pointers=True)};
+		%endfor
+	%endif
 </%def>

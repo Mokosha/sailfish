@@ -20,6 +20,12 @@ class LBSim(object):
 
     kernel_file = "__TEMPLATE_NOT_SET__"
 
+    #: List of additional template files or inline code fragments to include
+    #  in the generated simulation code. The templates here are appended in
+    #  order, after the contents of kernel_file above. List entries are
+    #  considered to be code fragments if they have at least two lines.
+    aux_code = []
+
     #: Set this to a class implementing the SubdomainRunner interface in order
     #  to use subdomain runner other than default.
     subdomain_runner = None
@@ -99,6 +105,7 @@ class LBSim(object):
         for field in self.fields():
             if type(field) is ScalarField:
                 f = runner.make_scalar_field(name=field.name, async=True)
+                f[:] = field.init
                 self._scalar_fields.append(FieldPair(field, f))
             elif type(field) is VectorField:
                 f = runner.make_vector_field(name=field.name, async=True)
@@ -185,6 +192,9 @@ class LBSim(object):
 
     def get_pbc_kernels(self, runner):
         return []
+
+    def get_aux_kernels(self, runner):
+        return KernelPair([], [])
 
     def initial_conditions(self, runner):
         pass
@@ -286,13 +296,15 @@ class LBForcedSim(LBSim):
 
 
 class Field(object):
-    def __init__(self, name, expr=None, need_nn=False):
+    def __init__(self, name, expr=None, need_nn=False, init=0.0):
         """
         :param need_nn: if True, the model needs access to this field
             on the neighboring nodes.
+        :param init: Initial value. Only used for scalar fields.
         """
         self.name = name
         self.expr = expr
+        self.init = init
         self.need_nn = need_nn
 
 class ScalarField(Field):
