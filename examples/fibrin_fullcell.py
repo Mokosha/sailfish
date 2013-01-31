@@ -24,8 +24,8 @@ class FibrinBlock(Subdomain3D):
         print "Defining wall boundaries..."
         wall_bc = NTFullBBWall
         wall_map = np.logical_or(
-                        np.logical_or(hy == 0, hy == self.gy-1),
-                        np.logical_or(hx == 0, hx == self.gx-1))
+          np.logical_or(hy == 0, hy == self.gy-1),
+          np.logical_or(hx == 0, hx == self.gx-1))
         self.set_node(wall_map, wall_bc)
 
         print "Defining velocity boundaries..."
@@ -82,8 +82,8 @@ class FibrinSimulation(LBFluidSim, LBForcedSim):
     @classmethod
     def update_defaults(cls, defaults):
         defaults.update({
-            'lat_nx': 64,
-            'lat_ny': 64,
+            'lat_nx': 256,
+            'lat_ny': 256,
             'lat_nz': 128,
             'grid': 'D3Q19'})
 
