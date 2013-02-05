@@ -325,12 +325,16 @@ class LBSimulationController(object):
                 help='local_path:dest_path; if specified, will send the '
                 'contents of "local_path" to "dest_path" on all cluster '
                 'machines before starting the simulation.')
+        group.add_argument('--nocluster_sge', action='store_false', default=True,
+                dest='cluster_sge',
+                help='If True, standard SGE variables will be used to run '
+                'the job in a cluster.')
         group.add_argument('--nocluster_pbs', action='store_false', default=True,
                 dest='cluster_pbs',
                 help='If True, standard PBS variables will be used to run '
                 'the job in a cluster.')
-        group.add_argument('--cluster_pbs_initscript', type=str,
-                default='sailfish-init.sh', help='Script to execute on remote '
+        group.add_argument('--cluster_node_initscript', type=str,
+                default='', help='Script to execute on remote '
                 'nodes in order to set the environment prior to starting '
                 'a machine master.')
         group.add_argument('--cluster_pbs_interface', type=str,
@@ -513,29 +517,62 @@ class LBSimulationController(object):
                     args=(self.config, subdomains, self._lb_class))
         self._simulation_process.start()
 
-    def _start_pbs_handlers(self):
-        cluster = util.gpufile_to_clusterspec(os.environ['PBS_GPUFILE'],
-                self.config.cluster_pbs_interface)
-        self._pbs_handlers = []
+    def _get_socketserver_script_command():
+        if self.config.cluster_node_initscript != '':
+            return ". %s; python %s/socketserver.py :%s %s" %
+                      (self.config.cluster_node_initscript,
+                       (os.path.realpath(os.path.dirname(util.__file__))),
+                       port, id_string)
+        else:
+            return "python %s/socketserver.py :%s %s" %
+                         (os.path.realpath(os.path.dirname(util.__file__))),
+                          port, id_string)])
+
+
+    def _start_sge_handlers(self):
+        cluster = util.sge_hostfile_to_clusterspec(os.environ['PE_HOSTFILE'])
+        self._handlers = []
         id_string = 'sailfish-%s' % os.getpid()
 
         def _start_socketserver(addr, port):
-            return subprocess.Popen(['pbsdsh', '-h',
-                addr, 'sh', '-c',
-                ". %s ; python %s/socketserver.py :%s %s" %
-                (self.config.cluster_pbs_initscript,
-                    os.path.realpath(os.path.dirname(util.__file__)),
-                    port, id_string)])
+            script_cmd = self._get_socketserver_script_command()
+            return subprocess.Popen(['ssh', addr, script_cmd])
+        
+        self._handlers.append(_start_socketserver(node.addr, node.get_port())) for node in cluster.nodes
+
+        return (_start_socketserver, cluster)
+        
+    def _start_pbs_handlers(self):
+        cluster = util.gpufile_to_clusterspec(os.environ['PBS_GPUFILE'],
+                self.config.cluster_pbs_interface)
+        self._handlers = []
+        id_string = 'sailfish-%s' % os.getpid()
+
+        def _start_socketserver(addr, port):
+            script_cmd = self._get_socketserver_script_command()
+            return subprocess.Popen(['pbsdsh', '-h', addr, 'sh', '-c', script_cmd])
 
         for node in cluster.nodes:
             port = node.get_port()
-            self._pbs_handlers.append(_start_socketserver(node.addr, port))
+            self._handlers.append(_start_socketserver(node.addr, port))
 
+        return (_start_socketserver, cluster)
+
+    def _start_handlers(self):
+
+        (_start_socketserver, cluster) = (None, None)
+        if self._is_pbs_cluster():
+            (_start_socketserver, cluster) = self._start_pbs_handlers()
+        elif self._is_sge_cluster():
+            (_start_socketserver, cluster) = self._start_sge_handlers() 
+        else:
+            assert False, ('We only know how to start SGE and PBS handlers...')
+        
         def _try_next_port(i, node, still_starting):
             port = node.get_port() + 1
             node.set_port(port)
             print 'retrying node %s:%s...' % (node.host, node.addr)
-            self._pbs_handlers[i] = _start_socketserver(node.addr, port)
+            self._handlers[i] = _start_socketserver(node.addr, port)
             still_starting.append((i, node))
 
         starting_nodes = list(enumerate(cluster.nodes))
@@ -543,7 +580,7 @@ class LBSimulationController(object):
             still_starting = []
 
             for i, node in starting_nodes:
-                if self._pbs_handlers[i].returncode is not None:
+                if self._handlers[i].returncode is not None:
                     # Remote process terminated -- try to start again with a
                     # different port.
                     _try_next_port(i, node, still_starting)
@@ -563,6 +600,9 @@ class LBSimulationController(object):
 
         return cluster
 
+    def _is_sge_cluster(self):
+        return self.config.cluster_sge and 'PE_HOSTFILE' in os.environ
+
     def _is_pbs_cluster(self):
         return self.config.cluster_pbs and 'PBS_GPUFILE' in os.environ
 
@@ -573,11 +613,11 @@ class LBSimulationController(object):
         """
 
         # A PBS implementation with GPU-aware scheduling is required.
-        if self._is_pbs_cluster():
+        if self._is_pbs_cluster() or self._is_sge_cluster():
             assert self.config.cluster_spec == '', ('Cluster specifications '
-                    'are not supported when running under PBS.')
+                    'are not supported when running under PBS or SGE.')
 
-            cluster = self._start_pbs_handlers()
+            cluster = self._start_handlers()
             self._start_cluster_simulation(subdomains, cluster)
         elif self.config.cluster_spec:
             self._start_cluster_simulation(subdomains)
@@ -635,7 +675,7 @@ class LBSimulationController(object):
                 gw.exit()
 
             if self._is_pbs_cluster():
-                for handler in self._pbs_handlers:
+                for handler in self._handlers:
                     handler.terminate()
         else:
             if self.config.mode == 'benchmark':
