@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from sailfish.geo import LBGeometry2D
+from sailfish.geo import EqualSubdomainsGeometry2D
 from sailfish.subdomain import Subdomain2D
 from sailfish.node_type import NTFullBBWall, NTHalfBBWall, NTEquilibriumDensity
 from sailfish.controller import LBSimulationController
@@ -133,4 +133,4 @@ class PoiseuilleSim(LBFluidSim, LBForcedSim):
 
 
 if __name__ == '__main__':
-    LBSimulationController(PoiseuilleSim, LBGeometry2D).run()
+    LBSimulationController(PoiseuilleSim, EqualSubdomainsGeometry2D).run()
