@@ -517,43 +517,42 @@ class LBSimulationController(object):
                     args=(self.config, subdomains, self._lb_class))
         self._simulation_process.start()
 
-    def _get_socketserver_script_command():
-        if self.config.cluster_node_initscript != '':
-            return ". %s; python %s/socketserver.py :%s %s" %
-                      (self.config.cluster_node_initscript,
-                       (os.path.realpath(os.path.dirname(util.__file__))),
-                       port, id_string)
-        else:
-            return "python %s/socketserver.py :%s %s" %
-                         (os.path.realpath(os.path.dirname(util.__file__))),
-                          port, id_string)])
+    def _get_id_string(self):
+        return 'sailfish-%s' % os.getpid()
 
+    def _get_socketserver_script_command(self, port):
+        if self.config.cluster_node_initscript != '':
+            return ". %s; python %s/socketserver.py :%s %s" % (self.config.cluster_node_initscript,
+                       os.path.realpath(os.path.dirname(util.__file__)),
+                       port, self._get_id_string())
+        else:
+            return "python %s/socketserver.py :%s %s" % (
+                os.path.realpath(os.path.dirname(util.__file__)), port, self._get_id_string())
 
     def _start_sge_handlers(self):
         cluster = util.sge_hostfile_to_clusterspec(os.environ['PE_HOSTFILE'])
         self._handlers = []
-        id_string = 'sailfish-%s' % os.getpid()
 
         def _start_socketserver(addr, port):
-            script_cmd = self._get_socketserver_script_command()
-            return subprocess.Popen(['ssh', addr, script_cmd])
+            script_cmd = self._get_socketserver_script_command(port)
+            return subprocess.Popen(['ssh', addr, "cd %s; %s" % (os.getcwd(), script_cmd)])
         
-        self._handlers.append(_start_socketserver(node.addr, node.get_port())) for node in cluster.nodes
+        for node in cluster.nodes:
+            self._handlers.append(_start_socketserver(node.addr, node.get_port()))
 
         return (_start_socketserver, cluster)
         
     def _start_pbs_handlers(self):
-        cluster = util.gpufile_to_clusterspec(os.environ['PBS_GPUFILE'],
+        cluster = util.pbs_gpufile_to_clusterspec(os.environ['PBS_GPUFILE'],
                 self.config.cluster_pbs_interface)
         self._handlers = []
-        id_string = 'sailfish-%s' % os.getpid()
 
         def _start_socketserver(addr, port):
             script_cmd = self._get_socketserver_script_command()
             return subprocess.Popen(['pbsdsh', '-h', addr, 'sh', '-c', script_cmd])
 
         for node in cluster.nodes:
-            port = node.get_port()
+            port = node.get_port(port)
             self._handlers.append(_start_socketserver(node.addr, port))
 
         return (_start_socketserver, cluster)
@@ -587,7 +586,7 @@ class LBSimulationController(object):
                 else:
                     try:
                         s = socket.create_connection((node.addr, node.get_port()), timeout=5.0)
-                        if s.recv(256) != id_string:
+                        if s.recv(256) != self._get_id_string():
                             _try_next_port(i, node, still_starting)
                         s.close()
                     except (socket.timeout, socket.error):
@@ -660,7 +659,7 @@ class LBSimulationController(object):
         min_timings = []
         max_timings = []
 
-        if self.config.cluster_spec or self._is_pbs_cluster():
+        if self.config.cluster_spec or self._is_pbs_cluster() or self._is_sge_cluster():
             if self.config.mode == 'benchmark':
                 for ch, node_subdomains in zip(self._cluster_channels, self._node_subdomains):
                     for sub in node_subdomains:

@@ -59,7 +59,42 @@ def get_visualization_engines():
         except ImportError:
             pass
 
-def gpufile_to_clusterspec(gpufile, iface=''):
+def sge_hostfile_to_clusterspec(hostfile):
+    """Builds a Sailfish cluster definition based on a SGE HOSTFILE."""
+
+    nodes = defaultdict(set)
+    f = open(hostfile, 'r')
+    for line in f:
+        line = line.strip()
+        host = line.split()[0]
+
+        if socket.gethostname() in host:
+            continue
+
+        if 'gpu' in host:
+            nodes[host].add(0)
+
+    f.close()
+
+    port = random.randint(8000, 16000)
+
+    cluster = []
+    for node, gpus in nodes.iteritems():
+        try:
+            ipaddr = socket.gethostbyname(node)
+        except socket.error:
+            ipaddr = node
+        socketstr = 'socket=%s:%s' % (ipaddr, port)
+        cluster.append(config.MachineSpec(socketstr, node, gpus=list(gpus)))
+
+    class Cluster(object):
+        def __init__(self, nodes):
+            self.nodes = nodes
+
+    return Cluster(cluster)
+
+
+def pbs_gpufile_to_clusterspec(gpufile, iface=''):
     """Builds a Sailfish cluster definition based on a PBS GPUFILE."""
 
     nodes = defaultdict(set)
